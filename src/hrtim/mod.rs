@@ -205,10 +205,7 @@ pub enum MasterPreloadSource {
 }
 
 macro_rules! hrtim_finalize_body {
-    ($this:expr, $PreloadSource:ident, $TIMX:ident: (
-        $timXcr:ident, $ck_psc:ident, $perXr:ident, $perx:ident, $tXcen:ident, $rep:ident, $repx:ident, $dier:ident, $repie:ident
-        $(, $fltXr:ident, $eefXr1:ident, $eefXr2:ident, $Xeefr3:ident, $outXr:ident, $dtXr:ident)*),
-    ) => {{
+    ($this:expr, $PreloadSource:ident, $TIMX:ident: ($tXcen:ident $(, $outXr:ident)*),) => {{
         let tim = unsafe { &*$TIMX::ptr() };
         let (period, prescaler_bits) = match $this.count {
             CountSettings::Period(period) => (period as u32, PSCL::BITS as u16),
@@ -225,7 +222,7 @@ macro_rules! hrtim_finalize_body {
         };
 
         // Write prescaler and any special modes
-        tim.$timXcr().modify(|_r, w| unsafe {
+        tim.cr().modify(|_r, w| unsafe {
             w
                 // Enable Continuous mode
                 .cont().bit($this.timer_mode == HrTimerMode::Continuous)
@@ -240,41 +237,40 @@ macro_rules! hrtim_finalize_body {
                 .half().bit(half)
 
                 // Set prescaler
-                .$ck_psc().bits(prescaler_bits as u8)
+                .ckpsc().bits(prescaler_bits as u8)
         });
 
         $(
-            tim.timcr2().modify(|_r, w|
+            tim.cr2().modify(|_r, w|
                 // Set counting direction
                 w.udm().bit($this.counting_direction == HrCountingDirection::UpDown)
             );
 
             // Only available for timers with outputs(not HRTIM_MASTER)
             let _ = tim.$outXr();
-            tim.$timXcr().modify(|_r, w|
+            tim.cr().modify(|_r, w|
                 // Push-Pull mode
                 w.pshpll().bit($this.enable_push_pull)
             );
         )*
 
         // Write period
-        tim.$perXr().write(|w| unsafe { w.$perx().bits(period as u16) });
+        tim.perr().write(|w| unsafe { w.per().bits(period as u16) });
 
         // Enable fault sources and lock configuration
         $(unsafe {
             // Enable fault sources
             let fault_enable_bits = $this.fault_enable_bits as u32;
-            tim.$fltXr().write(|w| w
-                .flt1en().bit(fault_enable_bits & (1 << 0) != 0)
-                .flt2en().bit(fault_enable_bits & (1 << 1) != 0)
-                .flt3en().bit(fault_enable_bits & (1 << 2) != 0)
-                .flt4en().bit(fault_enable_bits & (1 << 3) != 0)
-                .flt5en().bit(fault_enable_bits & (1 << 4) != 0)
-                .flt6en().bit(fault_enable_bits & (1 << 5) != 0)
+            tim.fltr().write(|w| {
+                for i in 0..6 {
+                    w.flten(i).bit(fault_enable_bits & (1 << i) != 0);
+                }
+                w
+            }
             );
 
             // ... and lock configuration
-            tim.$fltXr().modify(|_r, w| w.fltlck().set_bit());
+            tim.fltr().modify(|_r, w| w.fltlck().set_bit());
 
             tim.$outXr().modify(|_r, w| w
                 // Set actions on fault for both outputs
@@ -296,7 +292,7 @@ macro_rules! hrtim_finalize_body {
 
                 // SAFETY: DeadtimeConfig makes sure rising and falling values are valid
                 // and DeadtimePrescaler has its own garantuee
-                tim.$dtXr().modify(|_r, w| w
+                tim.dtr().modify(|_r, w| w
                     .dtprsc().bits(prescaler as u8)
                     .dtr().bits(deadtime_rising_value)
                     .sdtr().bit(deadtime_rising_sign)
@@ -314,21 +310,21 @@ macro_rules! hrtim_finalize_body {
 
             // External event configs
             let eev_cfg = $this.eev_cfg.clone();
-            tim.$eefXr1().write(|w| w
+            tim.eefr1().write(|w| w
                 .ee1ltch().bit(eev_cfg.eev1.latch_bit).ee1fltr().bits(eev_cfg.eev1.filter_bits)
                 .ee2ltch().bit(eev_cfg.eev2.latch_bit).ee2fltr().bits(eev_cfg.eev2.filter_bits)
                 .ee3ltch().bit(eev_cfg.eev3.latch_bit).ee3fltr().bits(eev_cfg.eev3.filter_bits)
                 .ee4ltch().bit(eev_cfg.eev4.latch_bit).ee4fltr().bits(eev_cfg.eev4.filter_bits)
                 .ee5ltch().bit(eev_cfg.eev5.latch_bit).ee5fltr().bits(eev_cfg.eev5.filter_bits)
             );
-            tim.$eefXr2().write(|w| w
+            tim.eefr2().write(|w| w
                 .ee6ltch().bit(eev_cfg.eev6.latch_bit).ee6fltr().bits(eev_cfg.eev6.filter_bits)
                 .ee7ltch().bit(eev_cfg.eev7.latch_bit).ee7fltr().bits(eev_cfg.eev7.filter_bits)
                 .ee8ltch().bit(eev_cfg.eev8.latch_bit).ee8fltr().bits(eev_cfg.eev8.filter_bits)
                 .ee9ltch().bit(eev_cfg.eev9.latch_bit).ee9fltr().bits(eev_cfg.eev9.filter_bits)
                 .ee10ltch().bit(eev_cfg.eev10.latch_bit).ee10fltr().bits(eev_cfg.eev10.filter_bits)
             );
-            tim.$Xeefr3().write(|w| w
+            tim.eefr3().write(|w| w
                 .eevace().bit(eev_cfg.event_counter_enable_bit)
                 // External Event A Counter Reset"]
                 //.eevacres().bit()
@@ -339,13 +335,13 @@ macro_rules! hrtim_finalize_body {
         })*
 
 
-        hrtim_finalize_body!($PreloadSource, $this, tim, $timXcr);
+        hrtim_finalize_body!($PreloadSource, $this, tim);
 
         // Set repetition counter
-        unsafe { tim.$rep().write(|w| w.$repx().bits($this.repetition_counter)); }
+        unsafe { tim.repr().write(|w| w.rep().bits($this.repetition_counter)); }
 
         // Enable interrupts
-        tim.$dier().modify(|_r, w| w.$repie().bit($this.enable_repetition_interrupt));
+        tim.dier().modify(|_r, w| w.repie().bit($this.enable_repetition_interrupt));
 
         // Start timer
         //let master = unsafe { &*HRTIM_MASTER::ptr() };
@@ -359,22 +355,22 @@ macro_rules! hrtim_finalize_body {
         }
     }};
 
-    (PreloadSource, $this:expr, $tim:expr, $timXcr:ident) => {{
+    (PreloadSource, $this:expr, $tim:expr) => {{
         match $this.preload_source {
             Some(PreloadSource::OnCounterReset) => {
-                $tim.$timXcr().modify(|_r, w| w
+                $tim.cr().modify(|_r, w| w
                     .trstu().set_bit()
                     .preen().set_bit()
                 );
             },
             Some(PreloadSource::OnMasterTimerUpdate) => {
-                $tim.$timXcr().modify(|_r, w| w
+                $tim.cr().modify(|_r, w| w
                     .mstu().set_bit()
                     .preen().set_bit()
                 );
             }
             Some(PreloadSource::OnRepetitionUpdate) => {
-                $tim.$timXcr().modify(|_r, w| w
+                $tim.cr().modify(|_r, w| w
                     .trepu().set_bit()
                     .preen().set_bit()
                 );
@@ -383,10 +379,10 @@ macro_rules! hrtim_finalize_body {
         }
     }};
 
-    (MasterPreloadSource, $this:expr, $tim:expr, $timXcr:ident) => {{
+    (MasterPreloadSource, $this:expr, $tim:expr) => {{
         match $this.preload_source {
             Some(MasterPreloadSource::OnMasterRepetitionUpdate) => {
-                $tim.$timXcr().modify(|_r, w| w
+                $tim.cr().modify(|_r, w| w
                     .mrepu().set_bit()
                     .preen().set_bit()
                 );
@@ -501,8 +497,7 @@ macro_rules! hrtim_common_methods {
 
 // Implement PWM configuration for timer
 macro_rules! hrtim_hal {
-    ($($TIMX:ident: ($tXcen:ident),)+) => {
-        $(
+    ($TIMX:ident: $tXcen:ident) => {
             impl HrPwmAdvExt for $TIMX {
                 type PreloadSource = PreloadSource;
 
@@ -565,7 +560,7 @@ macro_rules! hrtim_hal {
 
                     hrtim_finalize_body!(
                         self, PreloadSource,
-                        $TIMX: (timcr, ckpsc, perr, per, $tXcen, repr, rep, timdier, repie, fltr, eefr1, eefr2, eefr3, outr, dtr),
+                        $TIMX: ($tXcen, outr),
                     )
                 }
 
@@ -653,7 +648,6 @@ macro_rules! hrtim_hal {
 
                 //pub fn swap_mode(mut self, enable: bool) -> Self
             }
-        )+
     };
 }
 
@@ -720,20 +714,18 @@ where
         ),
         timer::DmaChannel<HRTIM_MASTER>,
     ) {
-        hrtim_finalize_body!(self, MasterPreloadSource, HRTIM_MASTER: (mcr, ckpsc, mper, mper, mcen, mrep, mrep, mdier, mrepie),)
+        hrtim_finalize_body!(self, MasterPreloadSource, HRTIM_MASTER: (mcen),)
     }
 
     hrtim_common_methods!(HRTIM_MASTER, MasterPreloadSource);
 }
 
-hrtim_hal! {
-    HRTIM_TIMA: (tacen),
-    HRTIM_TIMB: (tbcen),
-    HRTIM_TIMC: (tccen),
-    HRTIM_TIMD: (tdcen),
-    HRTIM_TIME: (tecen),
-    HRTIM_TIMF: (tfcen),
-}
+hrtim_hal!(HRTIM_TIMA: tacen);
+hrtim_hal!(HRTIM_TIMB: tbcen);
+hrtim_hal!(HRTIM_TIMC: tccen);
+hrtim_hal!(HRTIM_TIMD: tdcen);
+hrtim_hal!(HRTIM_TIME: tecen);
+hrtim_hal!(HRTIM_TIMF: tfcen);
 
 /// # Safety
 /// Only implement for valid prescalers with correct values
@@ -795,3 +787,62 @@ impl<PSC: HrtimPrescaler> pwm::TimerType for TimerHrTim<PSC> {
         (period, PSC::BITS.into())
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Cpt {
+    Cpt1 = 0,
+    Cpt2 = 1,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Cmp {
+    Cmp1 = 0,
+    Cmp2 = 1,
+    Cmp3 = 2,
+    Cmp4 = 3,
+}
+
+pub trait BlockExt {
+    unsafe fn cmp_r(c: Cmp) -> &'static crate::stm32::hrtim_tima::CMP1R;
+    unsafe fn cpt_r(c: Cpt) -> &'static crate::stm32::hrtim_tima::CPT1R;
+    unsafe fn cptc_r(c: Cpt) -> &'static crate::stm32::hrtim_tima::CPT1CR;
+}
+
+macro_rules! block_ext {
+    ($TIMX:ty) => {
+        impl BlockExt for $TIMX {
+            unsafe fn cmp_r(c: Cmp) -> &'static crate::stm32::hrtim_tima::CMP1R {
+                let tim = unsafe { &*Self::ptr() };
+                match c {
+                    Cmp::Cmp1 => tim.cmp1r(),
+                    Cmp::Cmp2 => tim.cmp2r(),
+                    Cmp::Cmp3 => tim.cmp3r(),
+                    Cmp::Cmp4 => tim.cmp4r(),
+                }
+            }
+            unsafe fn cpt_r(c: Cpt) -> &'static crate::stm32::hrtim_tima::CPT1R {
+                let tim = unsafe { &*Self::ptr() };
+                match c {
+                    Cpt::Cpt1 => tim.cpt1r(),
+                    Cpt::Cpt2 => tim.cpt2r(),
+                }
+            }
+            unsafe fn cptc_r(c: Cpt) -> &'static crate::stm32::hrtim_tima::CPT1CR {
+                let tim = unsafe { &*Self::ptr() };
+                match c {
+                    Cpt::Cpt1 => tim.cpt1cr(),
+                    Cpt::Cpt2 => tim.cpt2cr(),
+                }
+            }
+        }
+    };
+}
+
+block_ext!(HRTIM_TIMA);
+block_ext!(HRTIM_TIMB);
+block_ext!(HRTIM_TIMC);
+block_ext!(HRTIM_TIMD);
+block_ext!(HRTIM_TIME);
+block_ext!(HRTIM_TIMF);

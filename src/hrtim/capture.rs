@@ -1,4 +1,4 @@
-use super::timer;
+use super::{timer, BlockExt, Cpt};
 use crate::dma::mux::DmaMuxResources;
 use crate::dma::traits::TargetAddress;
 use crate::dma::PeripheralToMemory;
@@ -8,11 +8,27 @@ use core::marker::PhantomData;
 pub struct Ch1;
 pub struct Ch2;
 
+pub trait ChExt {
+    const CPT: Cpt;
+}
+
+impl ChExt for Ch1 {
+    const CPT: Cpt = Cpt::Cpt1;
+}
+
+impl ChExt for Ch2 {
+    const CPT: Cpt = Cpt::Cpt2;
+}
+
 pub struct Dma;
 pub struct NoDma;
 
 pub struct HrCapt<TIM, PSCL, CH, DMA> {
     _x: PhantomData<(TIM, PSCL, CH, DMA)>,
+}
+
+impl<TIM, PSCL, CH: ChExt, DMA> ChExt for HrCapt<TIM, PSCL, CH, DMA> {
+    const CPT: Cpt = CH::CPT;
 }
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -149,37 +165,33 @@ pub fn dma_value_to_signed(x: u32, period: u16) -> i32 {
 }
 
 macro_rules! impl_capture {
-    ($($TIMX:ident: $CH:ident, $cptXr:ident, $cptXcr:ident, $cptXie:ident, $cptXde:ident, $cptXc:ident, $cptX:ident, $mux:expr),+) => {$(
+    ($($TIMX:ident: $CH:ident, $mux:expr),+) => {$(
         impl<PSCL> HrCapt<$TIMX, PSCL, $CH, NoDma> {
             /// Add event to capture
             ///
             /// If multiple events are added, they will be ORed together meaning
             /// that a capture will be trigger if any one of the events triggers
             pub fn add_event<E: CaptureEvent<$TIMX, PSCL>>(&mut self, _event: &E) {
-                let tim = unsafe { &*$TIMX::ptr() };
-
                 // SAFETY: We are the only one with access to cptXYcr
                 unsafe {
-                    tim.$cptXcr().modify(|r, w| w.bits(r.bits() | E::BITS));
+                    <$TIMX>::cptc_r(Self::CPT).modify(|r, w| w.bits(r.bits() | E::BITS));
                 }
             }
 
             /// Remove event to capture
             pub fn remove_event<E: CaptureEvent<$TIMX, PSCL>>(&mut self, _event: &E) {
-                let tim = unsafe { &*$TIMX::ptr() };
-
                 // SAFETY: We are the only one with access to cptXYcr
                 unsafe {
-                    tim.$cptXcr().modify(|r, w| w.bits(r.bits() & !E::BITS));
+                    <$TIMX>::cptc_r(Self::CPT).modify(|r, w| w.bits(r.bits() & !E::BITS));
                 }
             }
 
             /// Force capture trigger now
             pub fn trigger_now(&mut self) {
                 // SAFETY: We are the only one with access to cptXYcr
-                let tim = unsafe { &*$TIMX::ptr() };
-
-                tim.$cptXcr().modify(|_, w| w.swcpt().set_bit());
+                unsafe {
+                    <$TIMX>::cptc_r(Self::CPT).modify(|_, w| w.swcpt().set_bit());
+                }
             }
 
             // TODO: It would be sufficient to instead of hr_control only require exclusive access to the owning timer
@@ -188,13 +200,13 @@ macro_rules! impl_capture {
             pub fn enable_interrupt(&mut self, enable: bool, _hr_control: &mut super::HrPwmControl) {
                 let tim = unsafe { &*$TIMX::ptr() };
 
-                tim.timdier().modify(|_r, w| w.$cptXie().bit(enable));
+                tim.dier().modify(|_r, w| w.cptie(Self::CPT as u8).bit(enable));
             }
 
             pub fn enable_dma(self, _ch: timer::DmaChannel<$TIMX>) -> HrCapt<$TIMX, PSCL, $CH, Dma> {
                 // SAFETY: We own the only insance of this timers dma channel, no one else can do this
                 let tim = unsafe { &*$TIMX::ptr() };
-                tim.timdier().modify(|_r, w| w.$cptXde().set_bit());
+                tim.dier().modify(|_r, w| w.cptde(Self::CPT as u8).set_bit());
                 HrCapt {
                     _x: PhantomData
                 }
@@ -203,14 +215,13 @@ macro_rules! impl_capture {
 
         impl<PSCL, DMA> HrCapture for HrCapt<$TIMX, PSCL, $CH, DMA> {
             fn get_last(&self) -> (u16, CountingDirection) {
-                let tim = unsafe { &*$TIMX::ptr() };
-                let data = tim.$cptXr().read();
+                let data = unsafe { <$TIMX>::cpt_r(Self::CPT) }.read();
 
                 let dir = match data.dir().bit() {
                     true => CountingDirection::Down,
                     false => CountingDirection::Up,
                 };
-                let value = data.$cptX().bits();
+                let value = data.cpt().bits();
 
                 (value, dir)
             }
@@ -219,22 +230,21 @@ macro_rules! impl_capture {
                 let tim = unsafe { &*$TIMX::ptr() };
 
                 // No need for exclusive access since this is a write only register
-                tim.timicr().write(|w| w.$cptXc().set_bit());
+                tim.icr().write(|w| w.cptc(Self::CPT as u8).clear_bit_by_one());
             }
 
             fn is_pending(&self) -> bool {
                 let tim = unsafe { &*$TIMX::ptr() };
 
                 // No need for exclusive access since this is a read only register
-                tim.timisr().read().$cptX().bit()
+                tim.isr().read().cpt(Self::CPT as u8).bit()
             }
         }
 
         unsafe impl<PSCL> TargetAddress<PeripheralToMemory> for HrCapt<$TIMX, PSCL, $CH, Dma> {
             #[inline(always)]
             fn address(&self) -> u32 {
-                let tim = unsafe { &*$TIMX::ptr() };
-                &tim.$cptXr() as *const _ as u32
+                unsafe { <$TIMX>::cpt_r(Self::CPT).as_ptr() as u32 }
             }
 
             type MemSize = u32;
@@ -245,21 +255,21 @@ macro_rules! impl_capture {
 }
 
 impl_capture! {
-    HRTIM_TIMA: Ch1, cpt1r, cpt1cr, cpt1ie, cpt1de, cpt1c, cpt1, DmaMuxResources::HRTIM_TIMA,
-    HRTIM_TIMA: Ch2, cpt2r, cpt2cr, cpt2ie, cpt2de, cpt2c, cpt2, DmaMuxResources::HRTIM_TIMA,
+    HRTIM_TIMA: Ch1, DmaMuxResources::HRTIM_TIMA,
+    HRTIM_TIMA: Ch2, DmaMuxResources::HRTIM_TIMA,
 
-    HRTIM_TIMB: Ch1, cpt1r, cpt1cr, cpt1ie, cpt1de, cpt1c, cpt1, DmaMuxResources::HRTIM_TIMB,
-    HRTIM_TIMB: Ch2, cpt2r, cpt2cr, cpt2ie, cpt2de, cpt2c, cpt2, DmaMuxResources::HRTIM_TIMB,
+    HRTIM_TIMB: Ch1, DmaMuxResources::HRTIM_TIMB,
+    HRTIM_TIMB: Ch2, DmaMuxResources::HRTIM_TIMB,
 
-    HRTIM_TIMC: Ch1, cpt1r, cpt1cr, cpt1ie, cpt1de, cpt1c, cpt1, DmaMuxResources::HRTIM_TIMC,
-    HRTIM_TIMC: Ch2, cpt2r, cpt2cr, cpt2ie, cpt2de, cpt2c, cpt2, DmaMuxResources::HRTIM_TIMC,
+    HRTIM_TIMC: Ch1, DmaMuxResources::HRTIM_TIMC,
+    HRTIM_TIMC: Ch2, DmaMuxResources::HRTIM_TIMC,
 
-    HRTIM_TIMD: Ch1, cpt1r, cpt1cr, cpt1ie, cpt1de, cpt1c, cpt1, DmaMuxResources::HRTIM_TIMD,
-    HRTIM_TIMD: Ch2, cpt2r, cpt2cr, cpt2ie, cpt2de, cpt2c, cpt2, DmaMuxResources::HRTIM_TIMD,
+    HRTIM_TIMD: Ch1, DmaMuxResources::HRTIM_TIMD,
+    HRTIM_TIMD: Ch2, DmaMuxResources::HRTIM_TIMD,
 
-    HRTIM_TIME: Ch1, cpt1r, cpt1cr, cpt1ie, cpt1de, cpt1c, cpt1, DmaMuxResources::HRTIM_TIME,
-    HRTIM_TIME: Ch2, cpt2r, cpt2cr, cpt2ie, cpt2de, cpt2c, cpt2, DmaMuxResources::HRTIM_TIME,
+    HRTIM_TIME: Ch1, DmaMuxResources::HRTIM_TIME,
+    HRTIM_TIME: Ch2, DmaMuxResources::HRTIM_TIME,
 
-    HRTIM_TIMF: Ch1, cpt1r, cpt1cr, cpt1ie, cpt1de, cpt1c, cpt1, DmaMuxResources::HRTIM_TIMF,
-    HRTIM_TIMF: Ch2, cpt2r, cpt2cr, cpt2ie, cpt2de, cpt2c, cpt2, DmaMuxResources::HRTIM_TIMF
+    HRTIM_TIMF: Ch1, DmaMuxResources::HRTIM_TIMF,
+    HRTIM_TIMF: Ch2, DmaMuxResources::HRTIM_TIMF
 }

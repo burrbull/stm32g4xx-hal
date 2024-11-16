@@ -133,12 +133,12 @@ macro_rules! hrtim_timer {
             fn get_period(&self) -> u16 {
                 let tim = unsafe { &*$TIMX::ptr() };
 
-                tim.$perXr().read().$perx().bits()
+                tim.perr().read().$perx().bits()
             }
             fn set_period(&mut self, period: u16) {
                 let tim = unsafe { &*$TIMX::ptr() };
 
-                tim.$perXr().write(|w| unsafe { w.$perx().bits(period as u16) });
+                tim.perr().write(|w| unsafe { w.$perx().bits(period as u16) });
             }
 
             /// Start timer
@@ -147,7 +147,7 @@ macro_rules! hrtim_timer {
 
                 // SAFETY: Since we hold _hr_control there is no risk for a race condition
                 let master = unsafe { &*HRTIM_MASTER::ptr() };
-                master.mcr().modify(|_r, w| { w.$tXcen().set_bit() });
+                master.cr().modify(|_r, w| { w.$tXcen().set_bit() });
             }
 
             /// Stop timer
@@ -155,7 +155,7 @@ macro_rules! hrtim_timer {
                 // Stop counter
                 // SAFETY: Since we hold _hr_control there is no risk for a race condition
                 let master = unsafe { &*HRTIM_MASTER::ptr() };
-                master.mcr().modify(|_r, w| { w.$tXcen().set_bit() });
+                master.cr().modify(|_r, w| { w.$tXcen().set_bit() });
             }
 
             /// Stop timer and reset counter
@@ -164,7 +164,7 @@ macro_rules! hrtim_timer {
 
                 // Reset counter
                 let tim = unsafe { &*$TIMX::ptr() };
-                unsafe { tim.$cntXr().write(|w| w.$cntx().bits(0)); }
+                unsafe { tim.cntr().write(|w| w.$cntx().bits(0)); }
             }
 
             /// Make a handle to this timers reset event to use as adc trigger
@@ -180,7 +180,7 @@ macro_rules! hrtim_timer {
             fn clear_repetition_interrupt(&mut self) {
                 let tim = unsafe { &*$TIMX::ptr() };
 
-                tim.$icr().write(|w| w.$repc().set_bit());
+                tim.icr().write(|w| w.$repc().clear_bit_by_one());
             }
 
             /// Disable register updates
@@ -211,7 +211,7 @@ macro_rules! hrtim_timer {
             pub fn set_repetition_counter(&mut self, repetition_counter: u8) {
                 let tim = unsafe { &*$TIMX::ptr() };
 
-                unsafe { tim.$rep().write(|w| w.$repx().bits(repetition_counter)); }
+                unsafe { tim.repr().write(|w| w.rep().bits(repetition_counter)); }
             }
 
             pub fn enable_repetition_interrupt(&mut self, enable: bool) {
@@ -220,87 +220,6 @@ macro_rules! hrtim_timer {
                 tim.$dier().modify(|_r, w| w.$repie().bit(enable));
             }
         }
-
-        $(
-            impl<PSCL: HrtimPrescaler, CPT1, CPT2> HrSlaveTimer for HrTim<$TIMX, PSCL, CPT1, CPT2> {
-                type CptCh1 = HrCapt<Self::Timer, Self::Prescaler, capture::Ch1, capture::NoDma>;
-                type CptCh2 = HrCapt<Self::Timer, Self::Prescaler, capture::Ch2, capture::NoDma>;
-
-                /// Reset this timer every time the specified event occurs
-                ///
-                /// Behaviour depends on `timer_mode`:
-                ///
-                /// * `HrTimerMode::SingleShotNonRetriggable`: Enabling the timer enables it but does not start it.
-                ///   A first reset event starts the counting and any subsequent reset is ignored until the counter
-                ///   reaches the PER value. The PER event is then generated and the counter is stopped. A reset event
-                ///   restarts the counting from 0x0000.
-                /// * `HrTimerMode:SingleShotRetriggable`: Enabling the timer enables it but does not start it.
-                ///   A reset event starts the counting if the counter is stopped, otherwise it clears the counter.
-                ///   When the counter reaches the PER value, the PER event is generated and the counter is stopped.
-                ///   A reset event restarts the counting from 0x0000.
-                /// * `HrTimerMode::Continuous`: Enabling the timer enables and starts it simultaneously.
-                ///   When the counter reaches the PER value, it rolls-over to 0x0000 and resumes counting.
-                ///   The counter can be reset at any time
-                fn enable_reset_event<E: super::event::TimerResetEventSource<Self::Timer, Self::Prescaler>>(&mut self, _event: &E) {
-                    let tim = unsafe { &*$TIMX::ptr() };
-
-                    unsafe { tim.$rstXr().modify(|r, w| w.bits(r.bits() | E::BITS)); }
-                }
-
-                /// Stop listening to the specified event
-                fn disable_reset_event<E: super::event::TimerResetEventSource<Self::Timer, Self::Prescaler>>(&mut self, _event: &E) {
-                    let tim = unsafe { &*$TIMX::ptr() };
-
-                    unsafe { tim.$rstXr().modify(|r, w| w.bits(r.bits() & !E::BITS)); }
-                }
-            }
-
-            impl<PSCL: HrtimPrescaler> HrSlaveTimerCpt for HrTim<$TIMX, PSCL, HrCapt<$TIMX, PSCL, capture::Ch1, capture::NoDma>, HrCapt<$TIMX, PSCL, capture::Ch2, capture::NoDma>> {
-                type CaptureCh1 = <Self as HrSlaveTimer>::CptCh1;
-                type CaptureCh2 = <Self as HrSlaveTimer>::CptCh2;
-
-                /// Access the timers first capture channel
-                fn capture_ch1(&mut self) -> &mut Self::CaptureCh1 {
-                    &mut self.capture_ch1
-                }
-
-                /// Access the timers second capture channel
-                fn capture_ch2(&mut self) -> &mut Self::CaptureCh2 {
-                    &mut self.capture_ch2
-                }
-
-                fn split_capture(self) -> TimerSplitCapture<$TIMX, PSCL, capture::Ch1, capture::Ch2> {
-                    let HrTim{
-                        _timer,
-                        _prescaler,
-                        capture_ch1,
-                        capture_ch2,
-                    } = self;
-
-                    TimerSplitCapture {
-                        timer: HrTim{
-                            _timer,
-                            _prescaler,
-                            capture_ch1: (),
-                            capture_ch2: (),
-                        },
-                        ch1: capture_ch1,
-                        ch2: capture_ch2,
-                    }
-                }
-            }
-
-            /// Timer Period event
-            impl<DST, PSCL, CPT1, CPT2> super::event::EventSource<DST, PSCL> for HrTim<$TIMX, PSCL, CPT1, CPT2> {
-                // $rstXr
-                const BITS: u32 = 1 << 2;
-            }
-
-            /// Timer Update event
-            impl<PSCL, CPT1, CPT2> super::capture::CaptureEvent<$TIMX, PSCL> for HrTim<$TIMX, PSCL, CPT1, CPT2> {
-                const BITS: u32 = 1 << 1;
-            }
-        )*
     )+}
 }
 
@@ -323,21 +242,135 @@ macro_rules! hrtim_timer_adc_trigger {
     }
 }
 
+macro_rules! hrtim_timer_block {
+    ($TIMX:ident) => {
+        impl<PSCL: HrtimPrescaler, CPT1, CPT2> HrSlaveTimer for HrTim<$TIMX, PSCL, CPT1, CPT2> {
+            type CptCh1 = HrCapt<Self::Timer, Self::Prescaler, capture::Ch1, capture::NoDma>;
+            type CptCh2 = HrCapt<Self::Timer, Self::Prescaler, capture::Ch2, capture::NoDma>;
+
+            /// Reset this timer every time the specified event occurs
+            ///
+            /// Behaviour depends on `timer_mode`:
+            ///
+            /// * `HrTimerMode::SingleShotNonRetriggable`: Enabling the timer enables it but does not start it.
+            ///   A first reset event starts the counting and any subsequent reset is ignored until the counter
+            ///   reaches the PER value. The PER event is then generated and the counter is stopped. A reset event
+            ///   restarts the counting from 0x0000.
+            /// * `HrTimerMode:SingleShotRetriggable`: Enabling the timer enables it but does not start it.
+            ///   A reset event starts the counting if the counter is stopped, otherwise it clears the counter.
+            ///   When the counter reaches the PER value, the PER event is generated and the counter is stopped.
+            ///   A reset event restarts the counting from 0x0000.
+            /// * `HrTimerMode::Continuous`: Enabling the timer enables and starts it simultaneously.
+            ///   When the counter reaches the PER value, it rolls-over to 0x0000 and resumes counting.
+            ///   The counter can be reset at any time
+            fn enable_reset_event<
+                E: super::event::TimerResetEventSource<Self::Timer, Self::Prescaler>,
+            >(
+                &mut self,
+                _event: &E,
+            ) {
+                let tim = unsafe { &*$TIMX::ptr() };
+
+                unsafe {
+                    tim.rstr().modify(|r, w| w.bits(r.bits() | E::BITS));
+                }
+            }
+
+            /// Stop listening to the specified event
+            fn disable_reset_event<
+                E: super::event::TimerResetEventSource<Self::Timer, Self::Prescaler>,
+            >(
+                &mut self,
+                _event: &E,
+            ) {
+                let tim = unsafe { &*$TIMX::ptr() };
+
+                unsafe {
+                    tim.rstr().modify(|r, w| w.bits(r.bits() & !E::BITS));
+                }
+            }
+        }
+
+        impl<PSCL: HrtimPrescaler> HrSlaveTimerCpt
+            for HrTim<
+                $TIMX,
+                PSCL,
+                HrCapt<$TIMX, PSCL, capture::Ch1, capture::NoDma>,
+                HrCapt<$TIMX, PSCL, capture::Ch2, capture::NoDma>,
+            >
+        {
+            type CaptureCh1 = <Self as HrSlaveTimer>::CptCh1;
+            type CaptureCh2 = <Self as HrSlaveTimer>::CptCh2;
+
+            /// Access the timers first capture channel
+            fn capture_ch1(&mut self) -> &mut Self::CaptureCh1 {
+                &mut self.capture_ch1
+            }
+
+            /// Access the timers second capture channel
+            fn capture_ch2(&mut self) -> &mut Self::CaptureCh2 {
+                &mut self.capture_ch2
+            }
+
+            fn split_capture(self) -> TimerSplitCapture<$TIMX, PSCL, capture::Ch1, capture::Ch2> {
+                let HrTim {
+                    _timer,
+                    _prescaler,
+                    capture_ch1,
+                    capture_ch2,
+                } = self;
+
+                TimerSplitCapture {
+                    timer: HrTim {
+                        _timer,
+                        _prescaler,
+                        capture_ch1: (),
+                        capture_ch2: (),
+                    },
+                    ch1: capture_ch1,
+                    ch2: capture_ch2,
+                }
+            }
+        }
+
+        /// Timer Period event
+        impl<DST, PSCL, CPT1, CPT2> super::event::EventSource<DST, PSCL>
+            for HrTim<$TIMX, PSCL, CPT1, CPT2>
+        {
+            // $rstXr
+            const BITS: u32 = 1 << 2;
+        }
+
+        /// Timer Update event
+        impl<PSCL, CPT1, CPT2> super::capture::CaptureEvent<$TIMX, PSCL>
+            for HrTim<$TIMX, PSCL, CPT1, CPT2>
+        {
+            const BITS: u32 = 1 << 1;
+        }
+    };
+}
+
 use super::adc_trigger::Adc13Trigger as Adc13;
 use super::adc_trigger::Adc24Trigger as Adc24;
 use super::adc_trigger::Adc579Trigger as Adc579;
 use super::adc_trigger::Adc6810Trigger as Adc6810;
 
 hrtim_timer! {
-    HRTIM_MASTER: mcntr, mcnt, mper, mcen, mper, mrep, mrep, mdier, mrepie, micr, mrepc, mudis,,
+    HRTIM_MASTER: cntr, cnt, perr, mcen, per, repr, rep, dier, repie, icr, repc, mudis,,
 
-    HRTIM_TIMA: cntar, cntx, perar, tacen, perx, repar, repx, timadier, repie, timaicr, repc, taudis, (rstar),
-    HRTIM_TIMB: cntr, cntx, perbr, tbcen, perx, repbr, repx, timbdier, repie, timbicr, repc, tbudis, (rstbr),
-    HRTIM_TIMC: cntcr, cntx, percr, tccen, perx, repcr, repx, timcdier, repie, timcicr, repc, tcudis, (rstcr),
-    HRTIM_TIMD: cntdr, cntx, perdr, tdcen, perx, repdr, repx, timddier, repie, timdicr, repc, tdudis, (rstdr),
-    HRTIM_TIME: cnter, cntx, perer, tecen, perx, reper, repx, timedier, repie, timeicr, repc, teudis, (rster),
-    HRTIM_TIMF: cntfr, cntx, perfr, tfcen, perx, repfr, repx, timfdier, repie, timficr, repc, tfudis, (rstfr),
+    HRTIM_TIMA: cntr, cnt, perr, tacen, per, repr, rep, dier, repie, icr, repc, taudis, (rstr),
+    HRTIM_TIMB: cntr, cnt, perr, tbcen, per, repr, rep, dier, repie, icr, repc, tbudis, (rstr),
+    HRTIM_TIMC: cntr, cnt, perr, tccen, per, repr, rep, dier, repie, icr, repc, tcudis, (rstr),
+    HRTIM_TIMD: cntr, cnt, perr, tdcen, per, repr, rep, dier, repie, icr, repc, tdudis, (rstr),
+    HRTIM_TIME: cntr, cnt, perr, tecen, per, repr, rep, dier, repie, icr, repc, teudis, (rstr),
+    HRTIM_TIMF: cntr, cnt, perr, tfcen, per, repr, rep, dier, repie, icr, repc, tfudis, (rstr),
 }
+hrtim_timer_block!(HRTIM_TIMA);
+hrtim_timer_block!(HRTIM_TIMB);
+hrtim_timer_block!(HRTIM_TIMC);
+hrtim_timer_block!(HRTIM_TIMD);
+hrtim_timer_block!(HRTIM_TIME);
+hrtim_timer_block!(HRTIM_TIMF);
 
 hrtim_timer_adc_trigger! {
     HRTIM_MASTER: [(Adc13: [(PER: 1 << 4),]), (Adc24: [(PER: 1 << 4),]), (Adc579: [(PER: 4),]), (Adc6810: [(PER: 4),])],
