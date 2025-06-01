@@ -277,32 +277,23 @@ macro_rules! opamps {
                 vinm0: $vinm0:ty,
                 vinm1: $vinm1:ty,
 
-                inverting
-                :
+                inverting:
                 {
                     $(
-                        $inverting:ty
-                        :
-                        $inverting_mask:tt
+                        $inverting:ty: $inverting_mask:tt
                     ),*
                     $(,)?
                 }
                 ,
-                non_inverting
-                :
+                non_inverting:
                 {
                     $(
-                        $non_inverting:ty
-                        :
-                        $non_inverting_mask:tt
+                        $non_inverting:ty: $non_inverting_mask:tt
                     ),*
                     $(,)?
                 }
                 ,
-                output
-                :
-                $output:ty
-                ,
+                output: $output:ty,
             }
         ),*
         $(,)?
@@ -598,19 +589,18 @@ macro_rules! opamps {
                     unsafe {
                         (*crate::stm32::OPAMP::ptr())
                             .[<$opampreg _csr>]()
-                            .write(|csr_w|
-                                csr_w
-                                    .vp_sel()
-                                    .variant(I::VP_SEL)
-                                    .vm_sel()
-                                    .output()
-                                    .opaintoen()
-                                    .adcchannel()
-                                    .opaen()
-                                    .enabled()
-                            );
+                            .write(|w| {
+                                w.vp_sel().variant(I::VP_SEL);
+                                w.vm_sel().output();
+                                w.opaintoen().adcchannel();
+                                w.opaen().enabled()
+                            });
                     }
-                    Follower {opamp: PhantomData, input, output: InternalOutput}
+                    Follower {
+                        opamp: PhantomData,
+                        input,
+                        output: InternalOutput
+                    }
                 }
             }
         }

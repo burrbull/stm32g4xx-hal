@@ -116,328 +116,294 @@ pub enum Hysteresis {
     H70mV = 0b111,
 }
 
-/// Comparator positive input
-pub trait PositiveInput<C> {
-    fn setup(s: impl stasis::EntitlementLock<Resource = Self>, comp: &mut C);
+pub trait Comp: CompOutput {
+    type InP: InputPlus;
+    type InM: InputMinus;
+    const EVENT: ExtiEvent;
 }
 
-/// Comparator negative input
-pub trait NegativeInput<C> {
-    /// Does this input use the internal reference Vrefint
-    ///
-    /// This only true for [`RefintInput`]
-    const USE_VREFINT: bool;
-
-    /// Does this input rely on dividing Vrefint using an internal resistor divider
-    ///
-    /// This is only relevant for [`RefintInput`] other than [`refint_input::VRefint`]
-    const USE_RESISTOR_DIVIDER: bool = false;
-
-    fn setup(s: impl stasis::EntitlementLock<Resource = Self>, comp: &mut C);
+pub trait InputPlus {
+    fn inpsel(&self) -> bool;
 }
 
-macro_rules! positive_input_pin {
-    ($COMP:ident, $pin_0:ident, $pin_1:ident) => {
-        impl PositiveInput<$COMP> for gpio::$pin_0<Analog> {
-            fn setup(_s: impl stasis::EntitlementLock<Resource = Self>, comp: &mut $COMP) {
-                comp.csr().modify(|_, w| w.inpsel().bit(false));
+pub trait InputMinus {
+    fn inmsel(&self) -> u8;
+    fn use_vrefint(&self) -> bool;
+    fn use_resistor_divider(&self) -> bool;
+}
+
+macro_rules! input {
+    (
+        $COMP:ident,
+        $INP1:ident, $INP2:ident,
+        $DC1:ident, $DC2:ident,
+        $INM1:ident, $INM2:ident
+    ) => {
+        impl Comp for $COMP {
+            type InP = InP;
+            type InM = InM;
+            const EVENT: ExtiEvent = ExtiEvent::$COMP;
+        }
+
+        #[derive(Debug)]
+        pub enum InP {
+            $INP1(gpio::$INP1<Analog>),
+            $INP2(gpio::$INP2<Analog>),
+        }
+
+        impl InputPlus for InP {
+            fn inpsel(&self) -> bool {
+                match self {
+                    Self::$INP1(_) => false,
+                    Self::$INP2(_) => true,
+                }
             }
         }
 
-        impl PositiveInput<$COMP> for gpio::$pin_1<Analog> {
-            fn setup(_s: impl stasis::EntitlementLock<Resource = Self>, comp: &mut $COMP) {
-                comp.csr().modify(|_, w| w.inpsel().bit(true));
+        impl From<gpio::$INP1<Analog>> for InP {
+            fn from(pin: gpio::$INP1<Analog>) -> Self {
+                Self::$INP1(pin)
+            }
+        }
+
+        impl From<gpio::$INP2<Analog>> for InP {
+            fn from(pin: gpio::$INP2<Analog>) -> Self {
+                Self::$INP2(pin)
+            }
+        }
+
+        paste::paste! {
+            pub enum InM {
+                VRefintM14,
+                VRefintM12,
+                VRefintM34,
+                VRefint,
+                [<$DC1 Mix>](dac::$DC1<{ dac::M_MIX_SIG }, dac::Enabled>),
+                [<$DC1 Int>](dac::$DC1<{ dac::M_INT_SIG }, dac::Enabled>),
+                [<$DC2 Mix>](dac::$DC2<{ dac::M_MIX_SIG }, dac::Enabled>),
+                [<$DC2 Int>](dac::$DC2<{ dac::M_INT_SIG }, dac::Enabled>),
+                $INM1(gpio::$INM1<Analog>),
+                $INM2(gpio::$INM2<Analog>),
+            }
+
+            impl InputMinus for InM {
+                fn inmsel(&self) -> u8 {
+                    match self {
+                        Self::VRefintM14 => 0,
+                        Self::VRefintM12 => 1,
+                        Self::VRefintM34 => 2,
+                        Self::VRefint => 3,
+                        Self::[<$DC1 Mix>](_) | InM::[<$DC1 Int>](_) => 4,
+                        Self::[<$DC2 Mix>](_) | InM::[<$DC2 Int>](_) => 5,
+                        Self::$INM1(_) => 6,
+                        Self::$INM2(_) => 7,
+                    }
+                }
+                fn use_vrefint(&self) -> bool {
+                    matches!(self, Self::VRefintM14 | Self::VRefintM12 | Self::VRefintM34 | Self::VRefint)
+                }
+                fn use_resistor_divider(&self) -> bool {
+                    matches!(self, Self::VRefintM14 | Self::VRefintM12 | Self::VRefintM34)
+                }
+            }
+
+            impl From<dac::$DC1<{ dac::M_MIX_SIG }, dac::Enabled>> for InM {
+                fn from(token: dac::$DC1<{ dac::M_MIX_SIG }, dac::Enabled>) -> Self {
+                    Self::[<$DC1 Mix>](token)
+                }
+            }
+
+            impl From<dac::$DC1<{ dac::M_INT_SIG }, dac::Enabled>> for InM {
+                fn from(token: dac::$DC1<{ dac::M_INT_SIG }, dac::Enabled>) -> Self {
+                    Self::[<$DC1 Int>](token)
+                }
+            }
+
+            impl From<dac::$DC2<{ dac::M_MIX_SIG }, dac::Enabled>> for InM {
+                fn from(token: dac::$DC2<{ dac::M_MIX_SIG }, dac::Enabled>) -> Self {
+                    Self::[<$DC2 Mix>](token)
+                }
+            }
+
+            impl From<dac::$DC2<{ dac::M_INT_SIG }, dac::Enabled>> for InM {
+                fn from(token: dac::$DC2<{ dac::M_INT_SIG }, dac::Enabled>) -> Self {
+                    Self::[<$DC2 Int>](token)
+                }
+            }
+        }
+
+        impl From<gpio::$INM1<Analog>> for InM {
+            fn from(pin: gpio::$INM1<Analog>) -> Self {
+                Self::$INM1(pin)
+            }
+        }
+
+        impl From<gpio::$INM2<Analog>> for InM {
+            fn from(pin: gpio::$INM2<Analog>) -> Self {
+                Self::$INM2(pin)
             }
         }
     };
 }
+use input;
 
-positive_input_pin!(COMP1, PA1, PB1);
-positive_input_pin!(COMP2, PA7, PA3);
-positive_input_pin!(COMP3, PA0, PC1);
-positive_input_pin!(COMP4, PB0, PE7);
+pub mod comp1 {
+    use super::*;
+    input!(COMP1, PA1, PB1, Dac3Ch1, Dac1Ch1, PA4, PA0);
+}
+
+pub mod comp2 {
+    use super::*;
+    input!(COMP2, PA7, PA3, Dac3Ch2, Dac1Ch2, PA5, PA2);
+}
+
+pub mod comp3 {
+    use super::*;
+    input!(COMP3, PA0, PC1, Dac3Ch1, Dac1Ch1, PF1, PC0);
+}
+
+pub mod comp4 {
+    use super::*;
+    input!(COMP4, PB0, PE7, Dac3Ch2, Dac1Ch1, PE8, PB2);
+}
 
 #[cfg(feature = "comp5")]
-positive_input_pin!(COMP5, PB13, PD12);
+pub mod comp5 {
+    use super::*;
+    input!(COMP5, PB13, PD12, Dac4Ch1, Dac1Ch2, PB10, PD13);
+}
 
 #[cfg(feature = "comp6")]
-positive_input_pin!(COMP6, PB11, PD11);
-
-#[cfg(feature = "comp7")]
-positive_input_pin!(COMP7, PB14, PD14);
-
-macro_rules! negative_input_pin_helper {
-    ($COMP:ident, $input:ty, $bits:expr) => {
-        impl NegativeInput<$COMP> for $input {
-            const USE_VREFINT: bool = false;
-
-            fn setup(_s: impl stasis::EntitlementLock<Resource = Self>, comp: &mut $COMP) {
-                comp.csr().modify(|_, w| unsafe { w.inmsel().bits($bits) });
-            }
-        }
-    };
-}
-
-macro_rules! negative_input_pin {
-    ($($COMP:ident: $pin_0:ty, $pin_1:ty,)+) => {$(
-        negative_input_pin_helper!($COMP, $pin_0, 0b110);
-        negative_input_pin_helper!($COMP, $pin_1, 0b111);
-    )+};
-}
-
-negative_input_pin! {
-    COMP1: gpio::PA4<Analog>, gpio::PA0<Analog>,
-    COMP2: gpio::PA5<Analog>, gpio::PA2<Analog>,
-    COMP3: gpio::PF1<Analog>, gpio::PC0<Analog>,
-    COMP4: gpio::PE8<Analog>, gpio::PB2<Analog>,
+pub mod comp6 {
+    use super::*;
+    input!(COMP6, PB11, PD11, Dac4Ch2, Dac2Ch1, PD10, PB15);
 }
 
 #[cfg(feature = "comp7")]
-negative_input_pin! {
-    COMP5: gpio::PB10<Analog>, gpio::PD13<Analog>,
-    COMP6: gpio::PD10<Analog>, gpio::PB15<Analog>,
-    COMP7: gpio::PD15<Analog>, gpio::PB12<Analog>,
+pub mod comp7 {
+    use super::*;
+    input!(COMP7, PB14, PD14, Dac4Ch1, Dac2Ch1, PD15, PB12);
 }
 
-pub mod refint_input {
-    /// VRefint * 1/4
-    #[derive(Copy, Clone)]
-    pub struct VRefintM14;
-
-    /// VRefint * 1/2
-    #[derive(Copy, Clone)]
-    pub struct VRefintM12;
-
-    /// VRefint * 3/4
-    #[derive(Copy, Clone)]
-    pub struct VRefintM34;
-
-    /// VRefint
-    #[derive(Copy, Clone)]
-    pub struct VRefint;
-    macro_rules! impl_vrefint {
-        ($t:ty, $bits:expr, $use_r_div:expr) => {
-            impl super::RefintInput for $t {
-                const BITS: u8 = $bits;
-                const USE_RESISTOR_DIVIDER: bool = $use_r_div;
-            }
-
-            impl crate::stasis::Freeze for $t {}
-        };
-    }
-
-    impl_vrefint!(VRefintM14, 0b000, true);
-    impl_vrefint!(VRefintM12, 0b001, true);
-    impl_vrefint!(VRefintM34, 0b010, true);
-    impl_vrefint!(VRefint, 0b011, false);
-}
-
-pub trait RefintInput {
-    const BITS: u8;
-    const USE_RESISTOR_DIVIDER: bool;
-}
-
-macro_rules! refint_input {
-    ($($COMP:ident, )+) => {$(
-        impl<REF: RefintInput> NegativeInput<$COMP> for REF {
-            const USE_VREFINT: bool = true;
-            const USE_RESISTOR_DIVIDER: bool = <REF as RefintInput>::USE_RESISTOR_DIVIDER;
-
-            fn setup(_s: impl stasis::EntitlementLock<Resource = Self>, comp: &mut $COMP) {
-                comp.csr()
-                    .modify(|_, w| unsafe { w.inmsel().bits(<REF as RefintInput>::BITS) });
-            }
-        }
-    )+};
-}
-
-refint_input!(COMP1, COMP2, COMP3, COMP4,);
-
-#[cfg(feature = "comp7")]
-refint_input!(COMP5, COMP6, COMP7,);
-
-macro_rules! dac_input_helper {
-    ($COMP:ident: $channel:ident, $MODE:ident, $bits:expr) => {
-        impl<ED> NegativeInput<$COMP> for dac::$channel<{ dac::$MODE }, ED> {
-            const USE_VREFINT: bool = false;
-
-            fn setup(_s: impl stasis::EntitlementLock<Resource = Self>, comp: &mut $COMP) {
-                comp.csr().modify(|_, w| unsafe { w.inmsel().bits($bits) });
-            }
-        }
-    };
-}
-
-macro_rules! dac_input {
-    ($COMP:ident: $channel:ident, $bits:expr) => {
-        dac_input_helper!($COMP: $channel, M_MIX_SIG, $bits);
-        dac_input_helper!($COMP: $channel, M_INT_SIG, $bits);
-    };
-}
-
-dac_input!(COMP1: Dac3Ch1, 0b100);
-dac_input!(COMP1: Dac1Ch1, 0b101);
-
-dac_input!(COMP2: Dac3Ch2, 0b100);
-dac_input!(COMP2: Dac1Ch2, 0b101);
-
-dac_input!(COMP3: Dac3Ch1, 0b100);
-dac_input!(COMP3: Dac1Ch1, 0b101);
-
-dac_input!(COMP4: Dac3Ch2, 0b100);
-dac_input!(COMP4: Dac1Ch1, 0b101);
-
-#[cfg(feature = "comp5")]
-dac_input!(COMP5: Dac4Ch1, 0b100);
-#[cfg(feature = "comp5")]
-dac_input!(COMP5: Dac1Ch2, 0b101);
-
-#[cfg(feature = "comp6")]
-dac_input!(COMP6: Dac4Ch2, 0b100);
-#[cfg(feature = "comp6")]
-dac_input!(COMP6: Dac2Ch1, 0b101);
-
-#[cfg(feature = "comp7")]
-dac_input!(COMP7: Dac4Ch1, 0b100);
-#[cfg(feature = "comp7")]
-dac_input!(COMP7: Dac2Ch1, 0b101);
-
-pub struct Comparator<C, ED> {
-    regs: C,
+pub struct Comparator<COMP: Comp, ED> {
+    regs: COMP,
+    inp: COMP::InP,
+    inm: COMP::InM,
     _enabled: PhantomData<ED>,
 }
 
-pub trait ComparatorExt<COMP> {
+pub trait ComparatorExt: Sized {
     /// Initializes a comparator
-    fn comparator<P, N, PP, NP>(
+    fn comparator(
         self,
-        positive_input: P,
-        negative_input: N,
+        positive_input: impl Into<COMP::InP>,
+        negative_input: impl Into<COMP::InM>,
         config: Config,
         clocks: &Clocks,
-    ) -> Comparator<COMP, Disabled>
-    where
-        PP: PositiveInput<COMP>,
-        NP: NegativeInput<COMP>,
-        P: stasis::EntitlementLock<Resource = PP>,
-        N: stasis::EntitlementLock<Resource = NP>;
+    ) -> Comparator<Self, Disabled>;
 }
 
-macro_rules! impl_comparator {
-    ($COMP:ty, $comp:ident, $Event:expr) => {
-        impl ComparatorExt<$COMP> for $COMP {
-            fn comparator<P, N, PP, NP>(
-                mut self,
-                positive_input: P, // TODO: Store these
-                negative_input: N, // TODO: Store these
-                config: Config,
-                clocks: &Clocks,
-            ) -> Comparator<$COMP, Disabled>
-            where
-                PP: PositiveInput<$COMP>,
-                NP: NegativeInput<$COMP>,
-                P: stasis::EntitlementLock<Resource = PP>,
-                N: stasis::EntitlementLock<Resource = NP>,
-            {
-                PP::setup(positive_input, &mut self);
-                NP::setup(negative_input, &mut self);
-                // Delay for scaler voltage bridge initialization for certain negative inputs
-                let voltage_scaler_delay = clocks.sys_clk.raw() / (1_000_000 / 200); // 200us
-                cortex_m::asm::delay(voltage_scaler_delay);
-                self.csr().modify(|_, w| unsafe {
-                    w.hyst().bits(config.hysteresis as u8);
-                    w.scalen().bit(NP::USE_VREFINT);
-                    w.brgen().bit(NP::USE_RESISTOR_DIVIDER);
-                    w.pol().bit(config.inverted)
-                });
+impl<COMP: Comp> ComparatorExt for COMP {
+    fn comparator(
+        mut self,
+        positive_input: impl Into<COMP::InP>,
+        negative_input: impl Into<COMP::InM>,
+        config: Config,
+        clocks: &Clocks,
+    ) -> Comparator<COMP, Disabled> {
+        let positive_input = positive_input.into();
+        let negative_input = negative_input.into();
+        // Delay for scaler voltage bridge initialization for certain negative inputs
+        let voltage_scaler_delay = clocks.sys_clk.raw() / (1_000_000 / 200); // 200us
+        cortex_m::asm::delay(voltage_scaler_delay);
+        self.csr().modify(|_, w| unsafe {
+            w.hyst().bits(config.hysteresis as u8);
+            w.scalen().bit(negative_input.use_vrefint());
+            w.brgen().bit(negative_input.use_resistor_divider());
+            w.pol().bit(config.inverted)
+        });
 
-                Comparator {
-                    regs: self,
-                    _enabled: PhantomData,
-                }
-            }
+        Comparator {
+            regs: self,
+            inp: positive_input,
+            inm: negative_input,
+            _enabled: PhantomData,
         }
-
-        impl Comparator<$COMP, Disabled> {
-            /// Initializes a comparator
-            pub fn $comp<P, N, PP, NP>(
-                comp: $COMP,
-                positive_input: P,
-                negative_input: N,
-                config: Config,
-                clocks: &Clocks,
-            ) -> Self
-            where
-                PP: PositiveInput<$COMP>,
-                NP: NegativeInput<$COMP>,
-                P: stasis::EntitlementLock<Resource = PP>,
-                N: stasis::EntitlementLock<Resource = NP>,
-            {
-                comp.comparator(positive_input, negative_input, config, clocks)
-            }
-
-            /// Enables the comparator
-            pub fn enable(self) -> Comparator<$COMP, Enabled> {
-                self.regs.csr().modify(|_, w| w.en().set_bit());
-                Comparator {
-                    regs: self.regs,
-                    _enabled: PhantomData,
-                }
-            }
-
-            /// Enables raising the `ADC_COMP` interrupt at the specified output signal edge
-            pub fn listen(&self, edge: SignalEdge, exti: &EXTI) {
-                exti.listen($Event, edge);
-            }
-        }
-
-        impl<ED: EnabledState> Comparator<$COMP, ED> {
-            /// Returns the value of the output of the comparator
-            pub fn output(&self) -> bool {
-                self.regs.csr().read().value().bit_is_set()
-            }
-        }
-
-        impl Comparator<$COMP, Enabled> {
-            pub fn lock(self) -> Comparator<$COMP, Locked> {
-                // Setting this bit turns all other bits into read only until restart
-                self.regs.csr().modify(|_, w| w.lock().set_bit());
-                Comparator {
-                    regs: self.regs,
-                    _enabled: PhantomData,
-                }
-            }
-
-            /// Disables the comparator
-            pub fn disable(self) -> Comparator<$COMP, Disabled> {
-                self.regs.csr().modify(|_, w| w.en().clear_bit());
-                Comparator {
-                    regs: self.regs,
-                    _enabled: PhantomData,
-                }
-            }
-        }
-
-        impl<ED> Comparator<$COMP, ED> {
-            /// Disables raising interrupts for the output signal
-            pub fn unlisten(&self, exti: &EXTI) {
-                exti.unlisten($Event);
-            }
-
-            /// Returns `true` if the output signal interrupt is pending for the `edge`
-            pub fn is_pending(&self, exti: &EXTI) -> bool {
-                exti.is_pending($Event)
-            }
-
-            /// Unpends the output signal interrupt
-            pub fn unpend(&self, exti: &EXTI) {
-                exti.unpend($Event);
-            }
-        }
-    };
+    }
 }
 
-impl<COMP: CompOutput, ED> Comparator<COMP, ED> {
+impl<COMP: Comp> Comparator<COMP, Disabled> {
+    /// Initializes a comparator
+    pub fn new(
+        comp: COMP,
+        positive_input: impl Into<COMP::InP>,
+        negative_input: impl Into<COMP::InM>,
+        config: Config,
+        clocks: &Clocks,
+    ) -> Self {
+        comp.comparator(positive_input, negative_input, config, clocks)
+    }
+
+    /// Enables the comparator
+    pub fn enable(self) -> Comparator<COMP, Enabled> {
+        self.regs.csr().modify(|_, w| w.en().set_bit());
+        Comparator {
+            regs: self.regs,
+            _enabled: PhantomData,
+        }
+    }
+
+    /// Enables raising the `ADC_COMP` interrupt at the specified output signal edge
+    pub fn listen(&self, edge: SignalEdge, exti: &EXTI) {
+        exti.listen(COMP::EVENT, edge);
+    }
+}
+
+impl<COMP: Comp, ED: EnabledState> Comparator<COMP, ED> {
+    /// Returns the value of the output of the comparator
+    pub fn output(&self) -> bool {
+        self.regs.csr().read().value().bit_is_set()
+    }
+}
+
+impl<COMP: Comp> Comparator<COMP, Enabled> {
+    pub fn lock(self) -> Comparator<COMP, Locked> {
+        // Setting this bit turns all other bits into read only until restart
+        self.regs.csr().modify(|_, w| w.lock().set_bit());
+        Comparator {
+            regs: self.regs,
+            _enabled: PhantomData,
+        }
+    }
+
+    /// Disables the comparator
+    pub fn disable(self) -> Comparator<COMP, Disabled> {
+        self.regs.csr().modify(|_, w| w.en().clear_bit());
+        Comparator {
+            regs: self.regs,
+            _enabled: PhantomData,
+        }
+    }
+}
+
+impl<COMP: Comp, ED> Comparator<COMP, ED> {
+    /// Disables raising interrupts for the output signal
+    pub fn unlisten(&self, exti: &EXTI) {
+        exti.unlisten(COMP::EVENT);
+    }
+
+    /// Returns `true` if the output signal interrupt is pending for the `edge`
+    pub fn is_pending(&self, exti: &EXTI) -> bool {
+        exti.is_pending(COMP::EVENT)
+    }
+
+    /// Unpends the output signal interrupt
+    pub fn unpend(&self, exti: &EXTI) {
+        exti.unpend(COMP::EVENT);
+    }
+}
+
+impl<COMP: Comp, ED> Comparator<COMP, ED> {
     /// Configures a GPIO pin to output the signal of the comparator
     ///
     /// Multiple GPIO pins may be configured as the output simultaneously.
@@ -445,20 +411,6 @@ impl<COMP: CompOutput, ED> Comparator<COMP, ED> {
         let _pin = pin.into();
     }
 }
-
-impl_comparator!(COMP1, comp1, ExtiEvent::COMP1);
-impl_comparator!(COMP2, comp2, ExtiEvent::COMP2);
-impl_comparator!(COMP3, comp1, ExtiEvent::COMP3);
-impl_comparator!(COMP4, comp2, ExtiEvent::COMP4);
-
-#[cfg(feature = "comp5")]
-impl_comparator!(COMP5, comp1, ExtiEvent::COMP5);
-
-#[cfg(feature = "comp6")]
-impl_comparator!(COMP6, comp2, ExtiEvent::COMP6);
-
-#[cfg(feature = "comp7")]
-impl_comparator!(COMP7, comp2, ExtiEvent::COMP7);
 
 #[cfg(not(feature = "comp7"))]
 type Comparators = (COMP1, COMP2, COMP3, COMP4);
