@@ -12,7 +12,7 @@ use crate::exti::{Event as ExtiEvent, ExtiExt};
 use crate::gpio::{self, alt::CompOutput, Analog, SignalEdge};
 
 use crate::rcc::{Clocks, Rcc};
-use crate::stasis;
+//use crate::stasis;
 use crate::stm32::{COMP, EXTI};
 
 /// Enabled Comparator (type state)
@@ -31,40 +31,6 @@ impl ED for Disabled {}
 pub trait EnabledState {}
 impl EnabledState for Enabled {}
 impl EnabledState for Locked {}
-
-macro_rules! impl_comp {
-    ($($t:ident: $reg:ident,)+) => {$(
-        pub struct $t {
-            _rb: PhantomData<()>,
-        }
-
-        impl $t {
-            pub fn csr(&self) -> &$crate::stm32::comp::CCSR {
-                // SAFETY: The COMP1 type is only constructed with logical ownership of
-                // these registers.
-                &unsafe { &*COMP::ptr() }.$reg()
-            }
-        }
-    )+};
-}
-
-impl_comp! {
-    COMP1: c1csr,
-    COMP2: c2csr,
-    COMP3: c3csr,
-    COMP4: c4csr,
-}
-#[cfg(any(
-    feature = "stm32g473",
-    feature = "stm32g483",
-    feature = "stm32g474",
-    feature = "stm32g484"
-))]
-impl_comp! {
-    COMP5: c5csr,
-    COMP6: c6csr,
-    COMP7: c7csr,
-}
 
 // TODO: Split COMP in PAC
 
@@ -117,6 +83,7 @@ pub enum Hysteresis {
 }
 
 pub trait Comp: CompOutput {
+    fn csr(&self) -> &crate::pac::comp::CCSR;
     type InP: InputPlus;
     type InM: InputMinus;
     const EVENT: ExtiEvent;
@@ -135,11 +102,21 @@ pub trait InputMinus {
 macro_rules! input {
     (
         $COMP:ident,
+        $n:literal,
         $INP1:ident, $INP2:ident,
         $DC1:ident, $DC2:ident,
         $INM1:ident, $INM2:ident
     ) => {
+        pub struct $COMP {
+            pub(super) _rb: PhantomData<()>,
+        }
+
         impl Comp for $COMP {
+            fn csr(&self) -> &$crate::pac::comp::CCSR {
+                // SAFETY: The COMP1 type is only constructed with logical ownership of
+                // these registers.
+                &unsafe { &*COMP::ptr() }.ccsr($n)
+            }
             type InP = InP;
             type InM = InM;
             const EVENT: ExtiEvent = ExtiEvent::$COMP;
@@ -249,41 +226,51 @@ use input;
 
 pub mod comp1 {
     use super::*;
-    input!(COMP1, PA1, PB1, Dac3Ch1, Dac1Ch1, PA4, PA0);
+    input!(COMP1, 0, PA1, PB1, Dac3Ch1, Dac1Ch1, PA4, PA0);
 }
+pub use comp1::COMP1;
 
 pub mod comp2 {
     use super::*;
-    input!(COMP2, PA7, PA3, Dac3Ch2, Dac1Ch2, PA5, PA2);
+    input!(COMP2, 1, PA7, PA3, Dac3Ch2, Dac1Ch2, PA5, PA2);
 }
+pub use comp2::COMP2;
 
 pub mod comp3 {
     use super::*;
-    input!(COMP3, PA0, PC1, Dac3Ch1, Dac1Ch1, PF1, PC0);
+    input!(COMP3, 2, PA0, PC1, Dac3Ch1, Dac1Ch1, PF1, PC0);
 }
+pub use comp3::COMP3;
 
 pub mod comp4 {
     use super::*;
-    input!(COMP4, PB0, PE7, Dac3Ch2, Dac1Ch1, PE8, PB2);
+    input!(COMP4, 3, PB0, PE7, Dac3Ch2, Dac1Ch1, PE8, PB2);
 }
+pub use comp4::COMP4;
 
 #[cfg(feature = "comp5")]
 pub mod comp5 {
     use super::*;
-    input!(COMP5, PB13, PD12, Dac4Ch1, Dac1Ch2, PB10, PD13);
+    input!(COMP5, 4, PB13, PD12, Dac4Ch1, Dac1Ch2, PB10, PD13);
 }
+#[cfg(feature = "comp5")]
+pub use comp5::COMP5;
 
 #[cfg(feature = "comp6")]
 pub mod comp6 {
     use super::*;
-    input!(COMP6, PB11, PD11, Dac4Ch2, Dac2Ch1, PD10, PB15);
+    input!(COMP6, 5, PB11, PD11, Dac4Ch2, Dac2Ch1, PD10, PB15);
 }
+#[cfg(feature = "comp5")]
+pub use comp6::COMP6;
 
 #[cfg(feature = "comp7")]
 pub mod comp7 {
     use super::*;
-    input!(COMP7, PB14, PD14, Dac4Ch1, Dac2Ch1, PD15, PB12);
+    input!(COMP7, 6, PB14, PD14, Dac4Ch1, Dac2Ch1, PD15, PB12);
 }
+#[cfg(feature = "comp5")]
+pub use comp7::COMP7;
 
 pub struct Comparator<COMP: Comp, ED> {
     regs: COMP,
@@ -292,12 +279,12 @@ pub struct Comparator<COMP: Comp, ED> {
     _enabled: PhantomData<ED>,
 }
 
-pub trait ComparatorExt: Sized {
+pub trait ComparatorExt: Sized + Comp {
     /// Initializes a comparator
     fn comparator(
         self,
-        positive_input: impl Into<COMP::InP>,
-        negative_input: impl Into<COMP::InM>,
+        positive_input: impl Into<Self::InP>,
+        negative_input: impl Into<Self::InM>,
         config: Config,
         clocks: &Clocks,
     ) -> Comparator<Self, Disabled>;
@@ -305,9 +292,9 @@ pub trait ComparatorExt: Sized {
 
 impl<COMP: Comp> ComparatorExt for COMP {
     fn comparator(
-        mut self,
-        positive_input: impl Into<COMP::InP>,
-        negative_input: impl Into<COMP::InM>,
+        self,
+        positive_input: impl Into<Self::InP>,
+        negative_input: impl Into<Self::InM>,
         config: Config,
         clocks: &Clocks,
     ) -> Comparator<COMP, Disabled> {
@@ -349,6 +336,8 @@ impl<COMP: Comp> Comparator<COMP, Disabled> {
         self.regs.csr().modify(|_, w| w.en().set_bit());
         Comparator {
             regs: self.regs,
+            inp: self.inp,
+            inm: self.inm,
             _enabled: PhantomData,
         }
     }
@@ -372,6 +361,8 @@ impl<COMP: Comp> Comparator<COMP, Enabled> {
         self.regs.csr().modify(|_, w| w.lock().set_bit());
         Comparator {
             regs: self.regs,
+            inp: self.inp,
+            inm: self.inm,
             _enabled: PhantomData,
         }
     }
@@ -381,6 +372,8 @@ impl<COMP: Comp> Comparator<COMP, Enabled> {
         self.regs.csr().modify(|_, w| w.en().clear_bit());
         Comparator {
             regs: self.regs,
+            inp: self.inp,
+            inm: self.inm,
             _enabled: PhantomData,
         }
     }
