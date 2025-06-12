@@ -1,3 +1,6 @@
+use core::ops::{Deref, DerefMut};
+
+use crate::pac;
 use crate::prelude::*;
 use crate::time::Bps;
 
@@ -30,6 +33,26 @@ pub enum StopBits {
 impl StopBits {
     pub fn bits(self) -> u8 {
         self as u8
+    }
+}
+
+impl From<StopBits> for pac::usart1::cr2::STOP {
+    fn from(value: StopBits) -> Self {
+        match value {
+            StopBits::STOP0P5 => Self::Stop0p5,
+            StopBits::STOP1 => Self::Stop1,
+            StopBits::STOP1P5 => Self::Stop1p5,
+            StopBits::STOP2 => Self::Stop2,
+        }
+    }
+}
+
+impl From<StopBits> for pac::lpuart1::cr2::STOP {
+    fn from(value: StopBits) -> Self {
+        match value {
+            StopBits::STOP0P5 | StopBits::STOP1 => Self::Stop1,
+            StopBits::STOP1P5 | StopBits::STOP2 => Self::Stop2,
+        }
     }
 }
 
@@ -78,20 +101,34 @@ impl From<Bps> for LowPowerConfig {
 
 #[derive(PartialEq, PartialOrd, Clone, Copy)]
 pub struct FullConfig {
-    pub(crate) baudrate: Bps,
-    pub(crate) wordlength: WordLength,
-    pub(crate) parity: Parity,
-    pub(crate) stopbits: StopBits,
-    pub(crate) swap: bool,
-    pub(crate) tx_invert: bool,
-    pub(crate) rx_invert: bool,
-    pub(crate) fifo_enable: bool,
-    pub(crate) tx_fifo_threshold: FifoThreshold,
-    pub(crate) rx_fifo_threshold: FifoThreshold,
-    pub(crate) tx_fifo_interrupt: bool,
-    pub(crate) rx_fifo_interrupt: bool,
+    inner: LowPowerConfig,
     #[doc = "Number of bits no activity on rx line"]
     pub(crate) receiver_timeout: Option<u32>,
+}
+
+impl Deref for FullConfig {
+    type Target = LowPowerConfig;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl DerefMut for FullConfig {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl AsRef<Self> for LowPowerConfig {
+    fn as_ref(&self) -> &Self {
+        &self
+    }
+}
+
+impl AsRef<LowPowerConfig> for FullConfig {
+    fn as_ref(&self) -> &LowPowerConfig {
+        &self.inner
+    }
 }
 
 impl From<Bps> for FullConfig {
@@ -320,18 +357,7 @@ impl Default for FullConfig {
     fn default() -> FullConfig {
         let baudrate = 115_200.bps();
         FullConfig {
-            baudrate,
-            wordlength: WordLength::DataBits8,
-            parity: Parity::ParityNone,
-            stopbits: StopBits::STOP1,
-            swap: false,
-            tx_invert: false,
-            rx_invert: false,
-            fifo_enable: false,
-            tx_fifo_threshold: FifoThreshold::FIFO_8_BYTES,
-            rx_fifo_threshold: FifoThreshold::FIFO_8_BYTES,
-            tx_fifo_interrupt: false,
-            rx_fifo_interrupt: false,
+            inner: baudrate.into(),
             receiver_timeout: None,
         }
     }

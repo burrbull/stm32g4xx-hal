@@ -23,16 +23,16 @@ pub(crate) use wrap_r;
 
 macro_rules! wrap_w {
     (pub trait $TrR:ident {
-        $(fn $f:ident(&mut self $(, $n:ident: u8)?) -> $fr:path;)*
+        $(fn $f:ident(&mut self $(, $n:ident: $nty:ty)?) -> $fr:path;)*
     }) => {
         pub trait $TrR<REG: reg::$TrR> {
-            $(fn $f(&mut self $(, $n: u8)?) -> $fr;)*
+            $(fn $f(&mut self $(, $n: $nty)?) -> $fr;)*
         }
 
         impl<REG: reg::$TrR> $TrR<REG> for W<REG> {
             $(
                 #[inline(always)]
-                fn $f(&mut self $(, $n: u8)?) -> $fr {
+                fn $f(&mut self $(, $n: $nty)?) -> $fr {
                     REG::$f(self $(, $n)?)
                 }
             )*

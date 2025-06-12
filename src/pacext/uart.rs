@@ -6,6 +6,9 @@ use super::*;
 use crate::pac::lpuart1;
 use crate::pac::uart4;
 use crate::pac::usart1;
+use crate::serial::StopBits;
+
+type NoReturn = ();
 
 pub trait CommonRB: Sealed {
     type CR1rs: reg::Cr1R + reg::Cr1W;
@@ -136,6 +139,7 @@ wrap_w! {
         fn datainv(&mut self) -> usart1::cr2::DATAINV_W<'_, REG>;
         fn msbfirst(&mut self) -> usart1::cr2::MSBFIRST_W<'_, REG>;
         fn add(&mut self) -> usart1::cr2::ADD_W<'_, REG>;
+        fn set_stop(&mut self, bits: StopBits) -> NoReturn;
     }
 }
 wrap_w! {
@@ -366,6 +370,7 @@ mod reg {
         fn datainv(w: &mut W<Self>) -> usart1::cr2::DATAINV_W<'_, Self>;
         fn msbfirst(w: &mut W<Self>) -> usart1::cr2::MSBFIRST_W<'_, Self>;
         fn add(w: &mut W<Self>) -> usart1::cr2::ADD_W<'_, Self>;
+        fn set_stop(w: &mut W<Self>, bits: StopBits);
     }
     pub trait UCr2W: Cr2W {
         fn lbdl(w: &mut W<Self>) -> usart1::cr2::LBDL_W<'_, Self>;
@@ -583,6 +588,10 @@ macro_rules! impl_ext {
                 datainv -> usart1::cr2::DATAINV_W<'_, Self>;
                 msbfirst -> usart1::cr2::MSBFIRST_W<'_, Self>;
                 add -> usart1::cr2::ADD_W<'_, Self>;
+            }
+            #[inline(always)]
+            fn set_stop(w: &mut W<Self>, bits: StopBits) {
+                w.stop().variant(bits.into());
             }
         }
 
