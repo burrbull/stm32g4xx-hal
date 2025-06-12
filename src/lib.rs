@@ -32,6 +32,8 @@ pub use embedded_hal as hal;
 pub use embedded_hal_old as hal_02;
 pub use nb::block;
 
+pub mod pacext;
+
 #[cfg(feature = "stm32g431")]
 pub use stm32g4::stm32g431 as stm32;
 
