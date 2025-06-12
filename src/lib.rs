@@ -132,6 +132,29 @@ impl<RB, const A: usize> Ptr for Periph<RB, A> {
     const PTR: *const Self::RB = Self::PTR;
 }
 
+pub trait Steal: Sealed {
+    /// Steal an instance of this peripheral
+    ///
+    /// # Safety
+    ///
+    /// Ensure that the new instance of the peripheral cannot be used in a way
+    /// that may race with any existing instances, for example by only
+    /// accessing read-only or write-only registers, or by consuming the
+    /// original peripheral and using critical sections to coordinate
+    /// access between multiple new instances.
+    ///
+    /// Additionally the HAL may rely on only one
+    /// peripheral instance existing to ensure memory safety; ensure
+    /// no stolen instances are passed to such software.
+    unsafe fn steal() -> Self;
+}
+
+impl<RB, const A: usize> Steal for Periph<RB, A> {
+    unsafe fn steal() -> Self {
+        Self::steal()
+    }
+}
+
 fn stripped_type_name<T>() -> &'static str {
     let s = core::any::type_name::<T>();
     let p = s.split("::");
