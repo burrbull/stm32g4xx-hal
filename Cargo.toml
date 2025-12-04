@@ -430,3 +430,8 @@ path = "examples/hrtim/hrtim.rs"
 name = "hrtim-master"
 required-features = ["hrtim"]
 path = "examples/hrtim/master.rs"
+
+[patch.crates-io]
+stm32g4 = { git = "https://github.com/stm32-rs/stm32-rs-nightlies", features = [
+    "atomics",
+] }

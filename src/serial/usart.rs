@@ -639,8 +639,8 @@ impl<USART: Instance, Otype> Serial<USART, Otype> {
         usart.cr2().write(|w| {
             w.set_stop(cfg.stopbits);
             w.swap().bit(cfg.swap);
-            w.txinv().bit(config.tx_invert);
-            w.rxinv().bit(config.rx_invert)
+            w.txinv().bit(cfg.tx_invert);
+            w.rxinv().bit(cfg.rx_invert)
         });
 
         let cr1_bits = usart.config_rx_timeout(&config);

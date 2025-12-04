@@ -374,9 +374,9 @@ hal! {
 
 hal_ext_trgo! {
     crate::stm32::TIM1: (tim1, mms2),
-    crate::stm32::TIM2: (tim2, mms2),
-    crate::stm32::TIM3: (tim3, mms2),
-    crate::stm32::TIM4: (tim4, mms2),
+    crate::stm32::TIM2: (tim2, mms),
+    crate::stm32::TIM3: (tim3, mms),
+    crate::stm32::TIM4: (tim4, mms),
     crate::stm32::TIM6: (tim6, mms),
     crate::stm32::TIM7: (tim7, mms),
     crate::stm32::TIM8: (tim8, mms2),

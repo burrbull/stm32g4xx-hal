@@ -172,7 +172,7 @@
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 
-use crate::stm32::LPTIMER1;
+use crate::stm32::LPTIM1;
 #[cfg(any(
     feature = "stm32g473",
     feature = "stm32g474",
@@ -537,7 +537,7 @@ macro_rules! pins {
 }
 // Single channel timers
 pins! {
-    LPTIMER1:
+    LPTIM1:
         OUT: [
             gpio::PA14<AF1>,
             gpio::PB2<AF1>,
@@ -1274,7 +1274,7 @@ macro_rules! tim_hal {
                                 // AF2:
                                 //  BKINE = 1 -> break input enabled
                                 //  BKINP should make input active high (BDTR BKP will set polarity), bit value varies timer to timer
-                                tim.af2().write(|w| w.bkine().set_bit().bk2inp().$bk2inp_setting());
+                                tim.af2().write(|w| w.bk2ine().set_bit().bk2inp().$bk2inp_setting());
                             }
                         )*
                         else {
@@ -1900,5 +1900,5 @@ macro_rules! lptim_hal {
 }
 
 lptim_hal! {
-    LPTIMER1: lptimer1,
+    LPTIM1: lptimer1,
 }

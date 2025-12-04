@@ -153,7 +153,7 @@ bus! {
     FDCAN1 => (APB1_1, 25),
     PWR => (APB1_1, 28),
     I2C3 => (APB1_1, 30),
-    LPTIMER1 => (APB1_1, 31),
+    LPTIM1 => (APB1_1, 31),
     LPUART1 => (APB1_2, 0),
     UCPD1 => (APB1_2, 8),
 }

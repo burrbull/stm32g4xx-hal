@@ -180,7 +180,7 @@ impl<const SECTOR_SZ_KB: u32> FlashWriter<'_, SECTOR_SZ_KB> {
         }
 
         // Start Operation
-        self.flash.cr.cr().modify(|_, w| w.strt().set_bit());
+        self.flash.cr.cr().modify(|_, w| w.start().set_bit());
 
         // Wait for operation to finish
         while self.flash.sr.sr().read().bsy().bit_is_set() {}
