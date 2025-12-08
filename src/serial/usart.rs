@@ -5,7 +5,7 @@ use crate::dma::{
     mux::DmaMuxResources, traits::TargetAddress, MemoryToPeripheral, PeripheralToMemory,
 };
 use crate::gpio::{self, OpenDrain};
-use crate::rcc::{Enable, GetBusFreq, Rcc, RccBus, Reset};
+use crate::rcc::{BusClock, Enable, Rcc, RccBus, Reset};
 use crate::stm32::*;
 
 use cortex_m::interrupt;
@@ -562,7 +562,7 @@ macro_rules! uart_lp {
                 // try SYSCLK if PCLK is not high enough. We could also select 8x oversampling
                 // instead of 16x.
 
-                let clk = <$USARTX as RccBus>::Bus::get_frequency(&rcc.clocks).raw() as u64;
+                let clk = <$USARTX as RccBus>::Bus::clock(&rcc.clocks).raw() as u64;
                 let bdr = config.baudrate.0 as u64;
                 let div = ($clk_mul * clk) / bdr;
                 if div < 16 {
@@ -710,7 +710,7 @@ macro_rules! uart_full {
                 // try SYSCLK if PCLK is not high enough. We could also select 8x oversampling
                 // instead of 16x.
 
-                let clk = <$USARTX as RccBus>::Bus::get_frequency(&rcc.clocks).raw() as u64;
+                let clk = <$USARTX as RccBus>::Bus::clock(&rcc.clocks).raw() as u64;
                 let bdr = config.baudrate.0 as u64;
                 let clk_mul = 1;
                 let div = (clk_mul * clk) / bdr;

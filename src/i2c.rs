@@ -4,7 +4,7 @@ use embedded_hal::i2c::{ErrorKind, Operation, SevenBitAddress, TenBitAddress};
 use embedded_hal_old::blocking::i2c::{Read, Write, WriteRead};
 
 use crate::gpio::{self, OpenDrain};
-use crate::rcc::{Enable, GetBusFreq, Rcc, Reset};
+use crate::rcc::{BusClock, Rcc};
 #[cfg(any(
     feature = "stm32g473",
     feature = "stm32g474",
@@ -14,7 +14,7 @@ use crate::rcc::{Enable, GetBusFreq, Rcc, Reset};
 use crate::stm32::I2C4;
 use crate::stm32::{I2C1, I2C2, I2C3};
 use crate::time::Hertz;
-use core::{cmp, convert::TryInto, ops::Deref};
+use core::{cmp, convert::TryInto};
 
 /// I2C bus configuration.
 #[derive(Debug, Clone, Copy)]
@@ -197,10 +197,7 @@ macro_rules! busy_wait {
     };
 }
 
-pub trait Instance:
-    crate::Sealed + Deref<Target = i2c1::RegisterBlock> + Enable + Reset + GetBusFreq
-{
-}
+pub trait Instance: crate::rcc::Instance + crate::Ptr<RB = i2c1::RegisterBlock> {}
 
 macro_rules! i2c {
     ($I2CX:ident,
@@ -243,7 +240,7 @@ impl<I2C: Instance> I2cExt<I2C> for I2C {
 
         // Setup protocol timings
         self.timingr()
-            .write(|w| config.timing_bits(I2C::get_frequency(&rcc.clocks), w));
+            .write(|w| config.timing_bits(I2C::Bus::clock(&rcc.clocks), w));
 
         // Enable the I2C processing
         self.cr1().modify(|_, w| {
