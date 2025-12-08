@@ -291,7 +291,7 @@ impl<SPI: Instance> SpiExt<SPI> for SPI {
         Self::reset(rcc);
 
         let spi_freq = freq.into().raw();
-        let bus_freq = SPI::clock(&rcc.clocks).raw();
+        let bus_freq = SPI::Bus::clock(&rcc.clocks).raw();
         setup_spi_regs(&self, spi_freq, bus_freq, mode);
 
         Spi { spi: self, pins }
