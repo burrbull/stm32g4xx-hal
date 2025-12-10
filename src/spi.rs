@@ -200,33 +200,37 @@ impl<SPI: Instance, PINS> Spi<SPI, PINS> {
     #[inline]
     fn nb_read<W: FrameSize>(&mut self) -> nb::Result<W, Error> {
         let flags = self.flags_unchecked();
-        Err(if flags.contains(Flag::Overrun) {
-            nb::Error::Other(Error::Overrun)
-        } else if flags.contains(Flag::ModeFault) {
-            nb::Error::Other(Error::ModeFault)
-        } else if flags.contains(Flag::CrcError) {
-            nb::Error::Other(Error::Crc)
+        if flags.intersects(Flag::Overrun | Flag::ModeFault | Flag::CrcError) {
+            Err(if flags.contains(Flag::Overrun) {
+                nb::Error::Other(Error::Overrun)
+            } else if flags.contains(Flag::ModeFault) {
+                nb::Error::Other(Error::ModeFault)
+            } else {
+                nb::Error::Other(Error::Crc)
+            })
         } else if flags.contains(Flag::RxNotEmpty) {
-            return Ok(self.read_unchecked());
+            Ok(self.read_unchecked())
         } else {
-            nb::Error::WouldBlock
-        })
+            Err(nb::Error::WouldBlock)
+        }
     }
     #[inline]
     fn nb_write<W: FrameSize>(&mut self, word: W) -> nb::Result<(), Error> {
         let flags = self.flags_unchecked();
-        Err(if flags.contains(Flag::Overrun) {
-            nb::Error::Other(Error::Overrun)
-        } else if flags.contains(Flag::ModeFault) {
-            nb::Error::Other(Error::ModeFault)
-        } else if flags.contains(Flag::CrcError) {
-            nb::Error::Other(Error::Crc)
+        if flags.intersects(Flag::Overrun | Flag::ModeFault | Flag::CrcError) {
+            Err(if flags.contains(Flag::Overrun) {
+                nb::Error::Other(Error::Overrun)
+            } else if flags.contains(Flag::ModeFault) {
+                nb::Error::Other(Error::ModeFault)
+            } else {
+                nb::Error::Other(Error::Crc)
+            })
         } else if flags.contains(Flag::TxEmpty) {
             self.write_unchecked(word);
             return Ok(());
         } else {
-            nb::Error::WouldBlock
-        })
+            Err(nb::Error::WouldBlock)
+        }
     }
     #[inline]
     fn nb_read_no_err<W: FrameSize>(&mut self) -> nb::Result<W, core::convert::Infallible> {
