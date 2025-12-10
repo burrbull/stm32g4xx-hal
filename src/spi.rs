@@ -199,14 +199,14 @@ impl<SPI: Instance, PINS> Spi<SPI, PINS> {
 
     #[inline]
     fn nb_read<W: FrameSize>(&mut self) -> nb::Result<W, Error> {
-        let sr = self.spi.sr().read();
-        Err(if sr.ovr().bit_is_set() {
+        let flags = self.flags_unchecked();
+        Err(if flags.contains(Flag::Overrun) {
             nb::Error::Other(Error::Overrun)
-        } else if sr.modf().bit_is_set() {
+        } else if flags.contains(Flag::ModeFault) {
             nb::Error::Other(Error::ModeFault)
-        } else if sr.crcerr().bit_is_set() {
+        } else if flags.contains(Flag::CrcError) {
             nb::Error::Other(Error::Crc)
-        } else if sr.rxne().bit_is_set() {
+        } else if flags.contains(Flag::RxNotEmpty) {
             return Ok(self.read_unchecked());
         } else {
             nb::Error::WouldBlock
@@ -214,14 +214,14 @@ impl<SPI: Instance, PINS> Spi<SPI, PINS> {
     }
     #[inline]
     fn nb_write<W: FrameSize>(&mut self, word: W) -> nb::Result<(), Error> {
-        let sr = self.spi.sr().read();
-        Err(if sr.ovr().bit_is_set() {
+        let flags = self.flags_unchecked();
+        Err(if flags.contains(Flag::Overrun) {
             nb::Error::Other(Error::Overrun)
-        } else if sr.modf().bit_is_set() {
+        } else if flags.contains(Flag::ModeFault) {
             nb::Error::Other(Error::ModeFault)
-        } else if sr.crcerr().bit_is_set() {
+        } else if flags.contains(Flag::CrcError) {
             nb::Error::Other(Error::Crc)
-        } else if sr.txe().bit_is_set() {
+        } else if flags.contains(Flag::TxEmpty) {
             self.write_unchecked(word);
             return Ok(());
         } else {
